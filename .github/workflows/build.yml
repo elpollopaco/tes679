@@ -1,1 +1,84 @@
-j
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preparar icono (icon.png en la raiz del repo)
+        run: |
+          python3 - <<'PY'
+          import os, math, struct, zlib
+          if os.path.exists("icon.png"):
+              print("icon.png encontrado, se usa el del repo")
+          else:
+              W = 512
+              rows = []
+              for y in range(W):
+                  row = bytearray([0])
+                  for x in range(W):
+                      d = math.hypot(x - 256, y - 256)
+                      if d < 190:
+                          px = (255, 200, 40)
+                      elif d < 215:
+                          px = (255, 255, 255)
+                      else:
+                          px = (30 + y // 8, 20, 80 + x // 8)
+                      row += bytes(px)
+                  rows.append(bytes(row))
+              def ch(t, d):
+                  c = struct.pack(">I", len(d)) + t + d
+                  return c + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+              png = (b"\x89PNG\r\n\x1a\n"
+                     + ch(b"IHDR", struct.pack(">IIBBBBB", W, W, 8, 2, 0, 0, 0))
+                     + ch(b"IDAT", zlib.compress(b"".join(rows), 9))
+                     + ch(b"IEND", b""))
+              open("icon.png", "wb").write(png)
+              print("icon.png generado")
+          PY
+
+      - name: Generar buildozer.spec
+        run: |
+          cat > buildozer.spec <<'EOF'
+          [app]
+          title = infClicker
+          package.name = clickerinfinito
+          package.domain = org.elpollopaco
+          source.dir = .
+          source.include_exts = py,png
+          source.exclude_dirs = .git, .github, bin, .buildozer
+          version = 1.0.0
+          requirements = python3,kivy==2.3.0
+          orientation = portrait
+          fullscreen = 0
+          icon.filename = %(source.dir)s/icon.png
+          android.api = 33
+          android.minapi = 21
+          android.archs = arm64-v8a, armeabi-v7a
+          android.accept_sdk_license = True
+          android.allow_backup = True
+
+          [buildozer]
+          log_level = 2
+          warn_on_root = 0
+          EOF
+
+      - name: Compilar con Buildozer
+        id: buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: clicker-infinito-apk
+          path: bin/*.apk
